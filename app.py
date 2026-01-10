@@ -14,7 +14,7 @@ NOM_FICHIER_DATA = "data.csv"
 NOM_FICHIER_LOGO = "logo.png"
 TAILLE_LOGO = 350
 
-# --- 3. FONCTION DE CHARGEMENT ET NETTOYAGE ---
+# --- 3. FONCTION DE CHARGEMENT ---
 @st.cache_data
 def load_data():
     if not os.path.exists(NOM_FICHIER_DATA):
@@ -22,7 +22,7 @@ def load_data():
 
     df = None
     
-    # Lecture (Tentative Excel puis CSV)
+    # Lecture (Excel ou CSV)
     try:
         df = pd.read_excel(NOM_FICHIER_DATA, header=1, engine='openpyxl')
     except:
@@ -44,23 +44,13 @@ def load_data():
     # Nettoyage
     if df is not None:
         try:
-            # 1. Renommage des colonnes (On inclut bien 2025 et 2026)
             if len(df.columns) >= 10:
                 df.columns = [
-                    "CLUSTER",             # 0
-                    "APPROVISIONNEMENT",   # 1
-                    "CA mini",             # 2
-                    "CA maxi",             # 3
-                    "NESTLE_2026",         # 4
-                    "LACTALIS_2026",       # 5
-                    "NUTRICIA_2026",       # 6
-                    "NESTLE_2025",         # 7
-                    "LACTALIS_2025",       # 8
-                    "NUTRICIA_2025"        # 9
+                    "CLUSTER", "APPROVISIONNEMENT", "CA mini", "CA maxi", 
+                    "NESTLE_2026", "LACTALIS_2026", "NUTRICIA_2026",
+                    "NESTLE_2025", "LACTALIS_2025", "NUTRICIA_2025"
                 ] + list(df.columns[10:])
 
-            # 2. Conversion en chiffres pour TOUTES les colonnes (2025 et 2026)
-            # C'est important pour pouvoir lire votre historique 2025
             cols_to_clean = [
                 "NESTLE_2026", "LACTALIS_2026", "NUTRICIA_2026",
                 "NESTLE_2025", "LACTALIS_2025", "NUTRICIA_2025"
@@ -68,10 +58,8 @@ def load_data():
             
             for col in cols_to_clean:
                 if col in df.columns:
-                    # Gestion virgule/point
                     if df[col].dtype == object:
                         df[col] = df[col].astype(str).str.replace(',', '.', regex=False)
-                    # Conversion (les erreurs deviennent NaN puis -1.0)
                     df[col] = pd.to_numeric(df[col], errors='coerce').fillna(-1.0)
             return df
         except:
@@ -81,10 +69,26 @@ def load_data():
 # --- 4. INTERFACE ---
 def main():
     
+    # --- ASTUCE CSS POUR CENTRER PARFAITEMENT L'IMAGE ---
+    st.markdown(
+        """
+        <style>
+            [data-testid="stImage"] {
+                display: block;
+                margin-left: auto;
+                margin-right: auto;
+            }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
     # --- EN-TÊTE ---
+    # On utilise des colonnes pour gérer la largeur, mais le CSS s'occupe du centrage fin
     col_g, col_c, col_d = st.columns([1, 2, 1])
     with col_c:
         if os.path.exists(NOM_FICHIER_LOGO):
+            # L'image sera centrée grâce au style CSS ci-dessus
             st.image(NOM_FICHIER_LOGO, width=TAILLE_LOGO)
         
         st.markdown(
@@ -116,11 +120,9 @@ def main():
 
     c3, c4 = st.columns(2)
     with c3:
-        # Modification du titre comme demandé
         liste_fournisseurs = ["NESTLE", "LACTALIS", "NUTRICIA", "AUTRE/GROSSISTE"]
         choix_2025 = st.selectbox("Fournisseur 2025", liste_fournisseurs)
     with c4:
-        # Modification du titre comme demandé
         ca_input = st.number_input(
             "Chiffre d'affaires avec fournisseur 2025 (€)", 
             min_value=0.0, step=500.0, format="%.2f"
@@ -131,7 +133,7 @@ def main():
     # --- CALCUL ---
     if st.button("📊 Calculer le gain de marge", type="primary", use_container_width=True):
         
-        # 1. Trouver la bonne ligne (Cluster + Appro + CA)
+        # Filtrage
         mask = (df['CLUSTER'].astype(str) == choix_cluster) & (df['APPROVISIONNEMENT'].astype(str) == choix_appro)
         df_filtre = df[mask]
 
@@ -146,48 +148,28 @@ def main():
             else:
                 row = resultat.iloc[0]
                 
-                # --- A. Analyse 2026 (Le Futur) ---
-                map_2026 = {
-                    "NESTLE": "NESTLE_2026",
-                    "LACTALIS": "LACTALIS_2026",
-                    "NUTRICIA": "NUTRICIA_2026"
-                }
-                # On cherche le meilleur taux parmi les 3 colonnes 2026
+                # A. Analyse 2026
+                map_2026 = {"NESTLE": "NESTLE_2026", "LACTALIS": "LACTALIS_2026", "NUTRICIA": "NUTRICIA_2026"}
                 scores_2026 = {nom: row.get(col, -1.0) for nom, col in map_2026.items()}
                 gagnant_2026 = max(scores_2026, key=scores_2026.get)
                 taux_gagnant_2026 = scores_2026[gagnant_2026]
 
-                # --- B. Analyse 2025 (Le Passé) ---
-                # On cherche le taux que vous aviez en 2025 selon votre sélection
-                map_2025 = {
-                    "NESTLE": "NESTLE_2025",
-                    "LACTALIS": "LACTALIS_2025",
-                    "NUTRICIA": "NUTRICIA_2025"
-                }
-                
+                # B. Analyse 2025
+                map_2025 = {"NESTLE": "NESTLE_2025", "LACTALIS": "LACTALIS_2025", "NUTRICIA": "NUTRICIA_2025"}
                 taux_2025 = 0.0
                 if choix_2025 in map_2025:
-                    col_2025 = map_2025[choix_2025]
-                    val_2025 = row.get(col_2025, -1.0)
-                    if val_2025 > 0:
-                        taux_2025 = val_2025
-                    else:
-                        taux_2025 = 0.0 # Si non éligible en 2025, on considère 0%
-                else:
-                    taux_2025 = 0.0 # Grossiste ou Autre
+                    val_2025 = row.get(map_2025[choix_2025], -1.0)
+                    if val_2025 > 0: taux_2025 = val_2025
+                
+                # C. Gain
+                gain_euros = (taux_gagnant_2026 - taux_2025) * ca_input
 
-                # --- C. Calcul du Gain ---
-                # Différence de marge * CA
-                diff_taux = taux_gagnant_2026 - taux_2025
-                gain_euros = diff_taux * ca_input
-
-                # --- D. Affichage ---
+                # D. Affichage
                 st.markdown("---")
                 
                 if taux_gagnant_2026 <= 0:
                     st.error("❌ Aucune offre éligible pour 2026.")
                 else:
-                    # Affichage simplifié en gros indicateurs
                     kpi1, kpi2, kpi3 = st.columns(3)
 
                     with kpi1:
