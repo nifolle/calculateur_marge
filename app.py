@@ -22,7 +22,7 @@ def load_data():
 
     df = None
     
-    # Lecture (Excel ou CSV)
+    # Lecture
     try:
         df = pd.read_excel(NOM_FICHIER_DATA, header=1, engine='openpyxl')
     except:
@@ -69,7 +69,7 @@ def load_data():
 # --- 4. INTERFACE ---
 def main():
     
-    # --- ASTUCE CSS POUR CENTRER PARFAITEMENT L'IMAGE ---
+    # CSS pour centrer le logo
     st.markdown(
         """
         <style>
@@ -84,11 +84,9 @@ def main():
     )
 
     # --- EN-TÊTE ---
-    # On utilise des colonnes pour gérer la largeur, mais le CSS s'occupe du centrage fin
     col_g, col_c, col_d = st.columns([1, 2, 1])
     with col_c:
         if os.path.exists(NOM_FICHIER_LOGO):
-            # L'image sera centrée grâce au style CSS ci-dessus
             st.image(NOM_FICHIER_LOGO, width=TAILLE_LOGO)
         
         st.markdown(
@@ -131,7 +129,7 @@ def main():
     st.markdown("<br>", unsafe_allow_html=True)
 
     # --- CALCUL ---
-    if st.button("📊 Calculer le gain de marge", type="primary", use_container_width=True):
+    if st.button("📊 Comparer les taux 2025 vs 2026", type="primary", use_container_width=True):
         
         # Filtrage
         mask = (df['CLUSTER'].astype(str) == choix_cluster) & (df['APPROVISIONNEMENT'].astype(str) == choix_appro)
@@ -148,21 +146,22 @@ def main():
             else:
                 row = resultat.iloc[0]
                 
-                # A. Analyse 2026
+                # A. Analyse 2026 (Meilleure offre)
                 map_2026 = {"NESTLE": "NESTLE_2026", "LACTALIS": "LACTALIS_2026", "NUTRICIA": "NUTRICIA_2026"}
                 scores_2026 = {nom: row.get(col, -1.0) for nom, col in map_2026.items()}
                 gagnant_2026 = max(scores_2026, key=scores_2026.get)
                 taux_gagnant_2026 = scores_2026[gagnant_2026]
 
-                # B. Analyse 2025
+                # B. Analyse 2025 (Historique)
                 map_2025 = {"NESTLE": "NESTLE_2025", "LACTALIS": "LACTALIS_2025", "NUTRICIA": "NUTRICIA_2025"}
                 taux_2025 = 0.0
                 if choix_2025 in map_2025:
                     val_2025 = row.get(map_2025[choix_2025], -1.0)
                     if val_2025 > 0: taux_2025 = val_2025
                 
-                # C. Gain
-                gain_euros = (taux_gagnant_2026 - taux_2025) * ca_input
+                # C. Calcul des Différentiels
+                diff_taux = taux_gagnant_2026 - taux_2025
+                gain_pour_10k = diff_taux * 10000
 
                 # D. Affichage
                 st.markdown("---")
@@ -170,6 +169,7 @@ def main():
                 if taux_gagnant_2026 <= 0:
                     st.error("❌ Aucune offre éligible pour 2026.")
                 else:
+                    # Affichage en 3 colonnes
                     kpi1, kpi2, kpi3 = st.columns(3)
 
                     with kpi1:
@@ -183,15 +183,21 @@ def main():
                         st.write(f"Taux : **{taux_2025:.2%}**")
 
                     with kpi3:
-                        if gain_euros > 0:
-                            st.success("💰 Gain de marge estimé")
-                            st.metric("Gain", f"+ {gain_euros:,.2f} €")
-                        elif gain_euros == 0:
-                            st.warning("⚖️ Maintien de marge")
-                            st.metric("Différence", "0 €")
+                        # Gestion des couleurs selon si c'est positif ou négatif
+                        if diff_taux > 0:
+                            st.success("📈 Gain de Marge")
+                            # 1. Différence en %
+                            st.metric("Évolution du taux", f"+ {diff_taux:.2%}")
+                            # 2. Gain par tranche de 10k
+                            st.metric("Gain en euros par tranche de 10k€ de CA Vente", f"+ {gain_pour_10k:,.2f} €")
+                        elif diff_taux == 0:
+                            st.warning("⚖️ Status Quo")
+                            st.metric("Évolution du taux", "0.00%")
+                            st.metric("Gain en euros par tranche de 10k€ de CA Vente", "0 €")
                         else:
-                            st.error("📉 Perte de marge")
-                            st.metric("Perte", f"{gain_euros:,.2f} €")
+                            st.error("📉 Perte de Marge")
+                            st.metric("Évolution du taux", f"{diff_taux:.2%}")
+                            st.metric("Gain en euros par tranche de 10k€ de CA Vente", f"{gain_pour_10k:,.2f} €")
 
 if __name__ == "__main__":
     main()
