@@ -4,7 +4,7 @@ import os
 
 # --- CONFIGURATION DU FICHIER ---
 # Si vous changez le nom du fichier sur GitHub, changez-le ici aussi
-NOM_FICHIER = 'COMPARATIF CNO 2025 V4.xlsx'
+NOM_FICHIER = 'COMPARATIF_CNO_2025_V4.xlsx'
 
 # Configuration de la page
 st.set_page_config(page_title="Comparateur CNO", page_icon="💊")
