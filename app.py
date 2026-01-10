@@ -12,7 +12,7 @@ st.set_page_config(
 # --- 2. VARIABLES DE CONFIGURATION ---
 # Mettez ici le nom EXACT de votre fichier de données
 # J'ai mis un nom simple, renommez votre fichier excel/csv en 'data.csv' pour faire simple
-NOM_FICHIER_DATA = "COMPARATIF CNO 2025 V10 (1).xlsx - MARGE PAR CLUSTERS CA.csv"
+NOM_FICHIER_DATA = "COMPARATIF_CNO_2025_V10.xlsx - MARGE PAR CLUSTERS CA.csv"
 NOM_FICHIER_LOGO = "logo.png" 
 TAILLE_LOGO = 400 # Taille réduite (environ 70% d'un affichage standard)
 
