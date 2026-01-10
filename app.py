@@ -9,12 +9,12 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- 2. VARIABLES DE CONFIGURATION ---
+# --- 2. VARIABLES ---
 NOM_FICHIER_DATA = "data.csv"
 NOM_FICHIER_LOGO = "logo.png"
 TAILLE_LOGO = 350
 
-# --- 3. FONCTION DE CHARGEMENT HYBRIDE ---
+# --- 3. FONCTION DE CHARGEMENT ET NETTOYAGE ---
 @st.cache_data
 def load_data():
     if not os.path.exists(NOM_FICHIER_DATA):
@@ -22,13 +22,12 @@ def load_data():
 
     df = None
     
-    # Tentative 1 : Excel
+    # Lecture (Tentative Excel puis CSV)
     try:
         df = pd.read_excel(NOM_FICHIER_DATA, header=1, engine='openpyxl')
     except:
         pass
 
-    # Tentative 2 : CSV
     if df is None:
         separateurs = [';', ',']
         for sep in separateurs:
@@ -45,28 +44,44 @@ def load_data():
     # Nettoyage
     if df is not None:
         try:
+            # 1. Renommage des colonnes (On inclut bien 2025 et 2026)
             if len(df.columns) >= 10:
                 df.columns = [
-                    "CLUSTER", "APPROVISIONNEMENT", "CA mini", "CA maxi", 
-                    "NESTLE_2026", "LACTALIS_2026", "NUTRICIA_2026",
-                    "NESTLE_2025", "LACTALIS_2025", "NUTRICIA_2025"
+                    "CLUSTER",             # 0
+                    "APPROVISIONNEMENT",   # 1
+                    "CA mini",             # 2
+                    "CA maxi",             # 3
+                    "NESTLE_2026",         # 4
+                    "LACTALIS_2026",       # 5
+                    "NUTRICIA_2026",       # 6
+                    "NESTLE_2025",         # 7
+                    "LACTALIS_2025",       # 8
+                    "NUTRICIA_2025"        # 9
                 ] + list(df.columns[10:])
 
-            cols_labos = ["NESTLE_2026", "LACTALIS_2026", "NUTRICIA_2026"]
-            for col in cols_labos:
+            # 2. Conversion en chiffres pour TOUTES les colonnes (2025 et 2026)
+            # C'est important pour pouvoir lire votre historique 2025
+            cols_to_clean = [
+                "NESTLE_2026", "LACTALIS_2026", "NUTRICIA_2026",
+                "NESTLE_2025", "LACTALIS_2025", "NUTRICIA_2025"
+            ]
+            
+            for col in cols_to_clean:
                 if col in df.columns:
+                    # Gestion virgule/point
                     if df[col].dtype == object:
                         df[col] = df[col].astype(str).str.replace(',', '.', regex=False)
+                    # Conversion (les erreurs deviennent NaN puis -1.0)
                     df[col] = pd.to_numeric(df[col], errors='coerce').fillna(-1.0)
             return df
         except:
             return None
     return None
 
-# --- 4. INTERFACE UTILISATEUR ---
+# --- 4. INTERFACE ---
 def main():
     
-    # --- A. EN-TÊTE ---
+    # --- EN-TÊTE ---
     col_g, col_c, col_d = st.columns([1, 2, 1])
     with col_c:
         if os.path.exists(NOM_FICHIER_LOGO):
@@ -83,13 +98,12 @@ def main():
 
     st.markdown("---")
 
-    # --- B. CHARGEMENT ---
     df = load_data()
     if df is None:
-        st.error("❌ Erreur : Fichier 'data.csv' introuvable ou illisible.")
+        st.error("❌ Erreur technique : Fichier de données introuvable.")
         return 
 
-    # --- C. FORMULAIRE ---
+    # --- FORMULAIRE ---
     st.subheader("🔎 Vos critères")
     
     c1, c2 = st.columns(2)
@@ -102,28 +116,28 @@ def main():
 
     c3, c4 = st.columns(2)
     with c3:
-        # Liste des choix N-1
+        # Modification du titre comme demandé
         liste_fournisseurs = ["NESTLE", "LACTALIS", "NUTRICIA", "AUTRE/GROSSISTE"]
-        choix_n1 = st.selectbox("Fournisseur N-1", liste_fournisseurs)
+        choix_2025 = st.selectbox("Fournisseur 2025", liste_fournisseurs)
     with c4:
+        # Modification du titre comme demandé
         ca_input = st.number_input(
-            "Chiffre d'affaires avec fournisseur N-1 (€)", 
+            "Chiffre d'affaires avec fournisseur 2025 (€)", 
             min_value=0.0, step=500.0, format="%.2f"
         )
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # --- D. CALCUL & ANALYSE ---
-    if st.button("📊 Analyser la meilleure offre 2026", type="primary", use_container_width=True):
+    # --- CALCUL ---
+    if st.button("📊 Calculer le gain de marge", type="primary", use_container_width=True):
         
-        # 1. Filtre Cluster/Appro
+        # 1. Trouver la bonne ligne (Cluster + Appro + CA)
         mask = (df['CLUSTER'].astype(str) == choix_cluster) & (df['APPROVISIONNEMENT'].astype(str) == choix_appro)
         df_filtre = df[mask]
 
         if df_filtre.empty:
-            st.warning(f"Profil inconnu : {choix_cluster} / {choix_appro}")
+            st.warning("Profil introuvable.")
         else:
-            # 2. Filtre CA
             mask_ca = (df_filtre['CA mini'] <= ca_input) & (df_filtre['CA maxi'] >= ca_input)
             resultat = df_filtre[mask_ca]
 
@@ -132,103 +146,70 @@ def main():
             else:
                 row = resultat.iloc[0]
                 
-                # Mapping des colonnes 2026
-                labos_map = {
+                # --- A. Analyse 2026 (Le Futur) ---
+                map_2026 = {
                     "NESTLE": "NESTLE_2026",
                     "LACTALIS": "LACTALIS_2026",
                     "NUTRICIA": "NUTRICIA_2026"
                 }
+                # On cherche le meilleur taux parmi les 3 colonnes 2026
+                scores_2026 = {nom: row.get(col, -1.0) for nom, col in map_2026.items()}
+                gagnant_2026 = max(scores_2026, key=scores_2026.get)
+                taux_gagnant_2026 = scores_2026[gagnant_2026]
 
-                # Récupération des taux
-                scores = {}
-                for nom, col in labos_map.items():
-                    scores[nom] = row.get(col, -1.0)
-
-                # --- 1. LE GAGNANT ---
-                gagnant = max(scores, key=scores.get)
-                taux_gagnant = scores[gagnant]
-
-                # --- 2. LE N-1 (Comparatif) ---
-                # Si le N-1 est dans la liste des labos, on prend son taux 2026
-                # Si c'est "AUTRE", on considère le taux comme 0.0 (pas de contrat direct)
-                if choix_n1 in labos_map:
-                    taux_n1 = row.get(labos_map[choix_n1], 0.0)
-                    # Si le labo N-1 est marqué "NON ELIGIBLE" (-1), on compte 0 pour le calcul du gain
-                    if taux_n1 < 0: taux_n1 = 0.0
+                # --- B. Analyse 2025 (Le Passé) ---
+                # On cherche le taux que vous aviez en 2025 selon votre sélection
+                map_2025 = {
+                    "NESTLE": "NESTLE_2025",
+                    "LACTALIS": "LACTALIS_2025",
+                    "NUTRICIA": "NUTRICIA_2025"
+                }
+                
+                taux_2025 = 0.0
+                if choix_2025 in map_2025:
+                    col_2025 = map_2025[choix_2025]
+                    val_2025 = row.get(col_2025, -1.0)
+                    if val_2025 > 0:
+                        taux_2025 = val_2025
+                    else:
+                        taux_2025 = 0.0 # Si non éligible en 2025, on considère 0%
                 else:
-                    taux_n1 = 0.0
+                    taux_2025 = 0.0 # Grossiste ou Autre
 
-                # --- 3. CALCUL DU GAIN EN EUROS ---
-                # Différence de taux * CA
-                delta_taux = taux_gagnant - taux_n1
-                gain_euros = delta_taux * ca_input
+                # --- C. Calcul du Gain ---
+                # Différence de marge * CA
+                diff_taux = taux_gagnant_2026 - taux_2025
+                gain_euros = diff_taux * ca_input
 
-                # --- E. AFFICHAGE ---
+                # --- D. Affichage ---
                 st.markdown("---")
-                st.subheader("🎯 Résultat Financier")
-
-                if taux_gagnant <= 0:
-                    st.error("❌ Aucune offre éligible pour ce profil.")
+                
+                if taux_gagnant_2026 <= 0:
+                    st.error("❌ Aucune offre éligible pour 2026.")
                 else:
-                    # Affichage en 3 colonnes pour bien séparer les infos
+                    # Affichage simplifié en gros indicateurs
                     kpi1, kpi2, kpi3 = st.columns(3)
 
                     with kpi1:
-                        st.info("🏆 Meilleure Stratégie")
-                        st.metric(label="Laboratoire", value=gagnant)
+                        st.info("🏆 Meilleure offre 2026")
+                        st.metric("Laboratoire", gagnant_2026)
+                        st.write(f"Taux : **{taux_gagnant_2026:.2%}**")
                     
                     with kpi2:
-                        st.info("📈 Performance")
-                        st.metric(label="Marge 2026", value=f"{taux_gagnant:.2%}")
+                        st.info(f"🔙 Votre historique {choix_2025}")
+                        st.metric("Comparatif", "Année 2025")
+                        st.write(f"Taux : **{taux_2025:.2%}**")
 
                     with kpi3:
-                        # Logique de couleur pour le gain
                         if gain_euros > 0:
-                            st.success(f"💰 Gain vs {choix_n1}")
-                            st.metric(label="Gain estimé", value=f"+ {gain_euros:,.2f} €")
+                            st.success("💰 Gain de marge estimé")
+                            st.metric("Gain", f"+ {gain_euros:,.2f} €")
                         elif gain_euros == 0:
-                            st.warning(f"⚖️ Status Quo vs {choix_n1}")
-                            st.metric(label="Différence", value="0 €")
+                            st.warning("⚖️ Maintien de marge")
+                            st.metric("Différence", "0 €")
                         else:
-                            st.error(f"📉 Perte vs {choix_n1}")
-                            st.metric(label="Différence", value=f"{gain_euros:,.2f} €")
-
-                    # Tableau détaillé
-                    st.write("### 📋 Comparatif détaillé")
-                    data_disp = []
-                    for nom, col in labos_map.items():
-                        val = row.get(col, -1.0)
-                        
-                        # Calcul du gain spécifique pour chaque labo par rapport au N-1
-                        if val > 0:
-                            diff_vs_n1 = (val - taux_n1) * ca_input
-                            txt_gain = f"{diff_vs_n1:+,.2f} €"
-                            statut = "✅ Eligible"
-                            if nom == gagnant: statut = "🏆 TOP CHOIX"
-                        else:
-                            txt_gain = "N/A"
-                            statut = "❌ Non éligible"
-
-                        data_disp.append({
-                            "Laboratoire": nom,
-                            "Marge 2026": f"{val:.2%}" if val > 0 else "NON ELIGIBLE",
-                            "Gain vs N-1 (€)": txt_gain,
-                            "Statut": statut
-                        })
-                    
-                    df_disp = pd.DataFrame(data_disp)
-                    
-                    # Style
-                    def style_rows(s):
-                        if s['Laboratoire'] == gagnant:
-                            return ['background-color: #d4edda; color: #155724; font-weight: bold'] * len(s)
-                        return [''] * len(s)
-
-                    st.dataframe(
-                        df_disp.style.apply(style_rows, axis=1), 
-                        use_container_width=True, 
-                        hide_index=True
-                    )
+                            st.error("📉 Perte de marge")
+                            st.metric("Perte", f"{gain_euros:,.2f} €")
 
 if __name__ == "__main__":
     main()
