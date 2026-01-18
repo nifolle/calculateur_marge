@@ -136,22 +136,51 @@ def get_rate_from_grid(df_grid, turnover, col_name):
 
 # --- 5. INTERFACE ---
 def main():
-    st.markdown("""<style>[data-testid="stImage"]{display: block; margin-left: auto; margin-right: auto;}</style>""", unsafe_allow_html=True)
+    
+    # --- MISE EN PAGE DU HEADER (Modifié pour alignement "g") ---
+    # On injecte du CSS pour :
+    # 1. Centrer le texte H1
+    # 2. Centrer l'image MAIS la décaler de 40px vers la droite (transform: translateX) pour l'aligner avec le "g"
+    st.markdown("""
+        <style>
+            [data-testid="stAppViewContainer"] > .main {
+                padding-top: 2rem;
+            }
+            .header-container {
+                text-align: center;
+            }
+            div[data-testid="stImage"] {
+                display: block;
+                margin-left: auto;
+                margin-right: auto;
+                text-align: center;
+            }
+            /* C'est ici que la magie opère : on décale l'image un peu à droite */
+            div[data-testid="stImage"] > img {
+                transform: translateX(45px); 
+            }
+            h1 {
+                text-align: center;
+                color: #2E4053;
+                margin-top: -10px;
+            }
+        </style>
+    """, unsafe_allow_html=True)
 
-    c1, c2, c3 = st.columns([1,2,1])
-    with c2:
-        if os.path.exists(NOM_FICHIER_LOGO):
-            st.image(NOM_FICHIER_LOGO, width=350)
-        st.markdown("<h1 style='text-align: center; color: #2E4053;'>Stratégie catégorielle CNO</h1>", unsafe_allow_html=True)
+    # Affichage du Logo et Titre sans colonnes pour un centrage absolu
+    if os.path.exists(NOM_FICHIER_LOGO):
+        st.image(NOM_FICHIER_LOGO, width=350)
+    st.markdown("<h1>Stratégie catégorielle CNO</h1>", unsafe_allow_html=True)
+    
     st.markdown("---")
 
+    # --- LOGIQUE DE L'APP ---
     df, error_msg = load_data()
     if df is None:
         st.error("❌ Erreur chargement fichier.")
         if error_msg: st.warning(error_msg)
         return
 
-    # --- ÉTAPES ---
     st.subheader("1️⃣ Profil Pharmacie")
     col_a, col_b = st.columns(2)
     with col_a:
@@ -188,7 +217,7 @@ def main():
         if df_grid.empty:
             st.error(f"Aucune grille trouvée pour : {choix_cluster} / {choix_appro}")
         else:
-            # --- A. CALCUL 2025 (Basé sur le CA RÉEL de chaque labo) ---
+            # --- A. CALCUL 2025 ---
             r_n25 = get_rate_from_grid(df_grid, ca_nestle, "NESTLE_2025")
             r_l25 = get_rate_from_grid(df_grid, ca_lactalis, "LACTALIS_2025")
             r_u25 = get_rate_from_grid(df_grid, ca_nutricia, "NUTRICIA_2025")
@@ -197,15 +226,13 @@ def main():
             marge_2025 = (ca_nestle*r_n25) + (ca_lactalis*r_l25) + (ca_nutricia*r_u25) + (ca_fresenius*r_f25)
             taux_moy_25 = marge_2025 / total_ca
 
-            # --- B. STRATEGIE 2026 (Basé sur des CA PROJETÉS 70/30) ---
+            # --- B. STRATEGIE 2026 ---
             vol_winner_70 = total_ca * 0.70
             vol_loser_30 = total_ca * 0.30
 
-            # On regarde qui gagnerait SI on lui donnait 70% du volume
             rate_nestle_if_win = get_rate_from_grid(df_grid, vol_winner_70, "NESTLE_2026")
             rate_nutricia_if_win = get_rate_from_grid(df_grid, vol_winner_70, "NUTRICIA_2026")
 
-            # Duel : Qui a le meilleur taux à 70% de part de marché ?
             if rate_nestle_if_win >= rate_nutricia_if_win:
                 win, lose = "NESTLE", "NUTRICIA"
                 t_win = rate_nestle_if_win
@@ -247,7 +274,6 @@ def main():
             st.markdown("<br>", unsafe_allow_html=True)
             with st.expander("🔎 DÉTAILS DES CALCULS (JUSTIFICATION)", expanded=True):
                 
-                # TABLEAU 2025
                 st.markdown("### 1. Détail 2025 (Réel)")
                 st.write("Le programme a cherché le taux correspondant au CA de **chaque** laboratoire individuellement.")
                 
@@ -265,7 +291,6 @@ def main():
 
                 st.markdown("---")
                 
-                # EXPLICATION 2026
                 st.markdown("### 2. Simulation 2026 (Projection)")
                 st.write(f"Hypothèse : Vous basculez **70%** de votre CA total ({total_ca:,.0f} €) sur le gagnant.")
                 
@@ -283,7 +308,7 @@ def main():
                     * Taux correspondant dans la grille : **{t_lose:.2%}**
                     """)
                 
-                # CORRECTION DE L'ERREUR D'AFFICHAGE LATEX ICI
+                # Formule corrigée pour éviter l'erreur LaTeX
                 st.latex(rf"\text{{Taux Final}} = (0.7 \times {t_win*100:.2f}\%) + (0.3 \times {t_lose*100:.2f}\%) = \mathbf{{{taux_strat_26*100:.2f}\%}}")
 
 if __name__ == "__main__":
