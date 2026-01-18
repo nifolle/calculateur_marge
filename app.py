@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import os
+import io
 
 # --- 1. CONFIGURATION ---
 st.set_page_config(page_title="Stratégie CNO", layout="wide")
@@ -17,7 +18,7 @@ def clean_currency(val):
     
     s = str(val).strip()
     s = s.replace('€', '').replace(' ', '').replace('\xa0', '') 
-    s = s.replace(',', '.') # Virgule -> Point
+    s = s.replace(',', '.') 
     if s in ['-', '']: return 0.0
     try:
         return float(s)
@@ -30,7 +31,7 @@ def clean_rate(val):
     if isinstance(val, (int, float)): return float(val)
 
     s = str(val).strip().upper()
-    s = s.replace(',', '.') # Virgule -> Point
+    s = s.replace(',', '.') 
     
     if "NON ELIGIBLE" in s:
         return 0.12 
@@ -39,7 +40,7 @@ def clean_rate(val):
     except:
         return 0.0
 
-# --- 3. CHARGEMENT ET PRÉPARATION (VERSION BULLDOZER) ---
+# --- 3. CHARGEMENT ROBUSTE (MÉTHODE NETTOYAGE MANUEL) ---
 @st.cache_data
 def load_data():
     target = NOM_FICHIER_DATA
@@ -50,35 +51,48 @@ def load_data():
 
     df = None
     try:
-        # 1. REPÉRAGE DE LA LIGNE D'EN-TÊTE
-        # On lit le fichier ligne par ligne pour trouver le numéro de la ligne qui contient "CLUSTER"
-        header_row_idx = 0
-        with open(target, 'r', encoding='latin-1') as f:
-            for i, line in enumerate(f):
-                if "CLUSTER" in line and "APPROVISIONNEMENT" in line:
-                    header_row_idx = i
-                    break
-        
-        # 2. LECTURE AVEC LE MOTEUR PYTHON (Plus tolérant aux erreurs)
-        # On essaie d'abord avec la virgule
+        # ÉTAPE 1 : Lecture du fichier en mode texte brut
+        # On essaie d'abord en Latin-1 (Excel standard), sinon UTF-8
+        content = ""
         try:
-            df = pd.read_csv(target, header=header_row_idx, sep=',', engine='python', encoding='latin-1')
+            with open(target, 'r', encoding='latin-1') as f:
+                lines = f.readlines()
         except:
-            # Si ça plante, on ne fait rien, on essaiera le point-virgule juste après
-            pass
+            with open(target, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
 
-        # 3. VÉRIFICATION ET SECONDE CHANCE
-        # Si df est vide ou s'il a tout mis dans une seule colonne (échec de la virgule)
-        if df is None or df.shape[1] < 5:
-            df = pd.read_csv(target, header=header_row_idx, sep=';', engine='python', encoding='latin-1')
+        # ÉTAPE 2 : Recherche de la ligne de titre
+        start_index = -1
+        separator = ',' # Par défaut
+        
+        for i, line in enumerate(lines):
+            if "CLUSTER" in line and "APPROVISIONNEMENT" in line:
+                start_index = i
+                # Détection automatique du séparateur sur la ligne de titre
+                if line.count(';') > line.count(','):
+                    separator = ';'
+                else:
+                    separator = ','
+                break
+        
+        if start_index == -1:
+            st.error("❌ Impossible de trouver la colonne 'CLUSTER' dans le fichier.")
+            return None
+
+        # ÉTAPE 3 : Création d'un contenu propre (sans les lignes d'avant)
+        # On ne garde que les lignes à partir du titre
+        clean_content = "".join(lines[start_index:])
+        
+        # ÉTAPE 4 : Chargement par Pandas depuis la mémoire
+        # On utilise io.StringIO pour faire croire à Pandas que c'est un fichier parfait
+        df = pd.read_csv(io.StringIO(clean_content), sep=separator)
 
     except Exception as e:
-        st.error(f"Échec total de la lecture : {e}")
+        st.error(f"Erreur fatale de lecture : {e}")
         return None
 
     if df is not None:
-        # --- RENOMMAGE ET NETTOYAGE ---
-        # On force les noms de colonnes car Pandas a peut-être ajouté des suffixes .1, .2
+        # Renommage des colonnes (Indispensable pour la V15 qui a des doublons)
         if len(df.columns) >= 12:
             new_cols = list(df.columns)
             new_cols[0] = "CLUSTER"
@@ -95,13 +109,12 @@ def load_data():
             new_cols[11] = "FRESENIUS_2025"
             df.columns = new_cols
 
-        # Conversion forcée en String pour les filtres
+        # Conversion et Nettoyage
         if "CLUSTER" in df.columns:
             df['CLUSTER'] = df['CLUSTER'].astype(str).str.strip()
         if "APPROVISIONNEMENT" in df.columns:
             df['APPROVISIONNEMENT'] = df['APPROVISIONNEMENT'].astype(str).str.strip()
         
-        # Nettoyage chiffres
         for col in ["CA mini", "CA maxi"]:
             if col in df.columns:
                 df[col] = df[col].apply(clean_currency)
@@ -130,7 +143,7 @@ def main():
 
     df = load_data()
     if df is None:
-        st.error("❌ Impossible de charger les données. Vérifiez le fichier CSV.")
+        st.warning("⚠️ Veuillez vérifier votre fichier 'data.csv'.")
         return
 
     # --- ÉTAPE 1 : CHOIX DU PROFIL ---
@@ -138,7 +151,6 @@ def main():
     col_a, col_b = st.columns(2)
     
     with col_a:
-        # On récupère les valeurs uniques dispo dans le fichier pour éviter les menus vides
         liste_clusters = sorted(df['CLUSTER'].unique()) if 'CLUSTER' in df.columns else ["Aprium", "UM/Monge"]
         choix_cluster = st.selectbox("Cluster", liste_clusters)
     with col_b:
