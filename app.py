@@ -119,20 +119,15 @@ def get_rate_from_grid(df_grid, turnover, col_name):
         return 0.0
     
     # On filtre la ligne où CA mini <= turnover <= CA maxi
-    # Note: On suppose que df_grid est déjà filtré par Cluster/Appro
-    
-    # 1. Cas normal : dans une tranche
     row = df_grid[(df_grid['CA mini'] <= turnover) & (df_grid['CA maxi'] >= turnover)]
     
-    # 2. Cas hors tranches (ex: CA très élevé)
+    # Gestion des cas hors tranches
     if row.empty:
         max_limit = df_grid['CA maxi'].max()
         if turnover > max_limit:
             # On prend la dernière tranche (la plus haute)
             row = df_grid[df_grid['CA maxi'] == max_limit]
         else:
-            # CA trop bas (sous le mini) -> 0% ou première tranche ?
-            # Généralement 0 si < min, mais ici on va supposer que la tranche 0 existe
             return 0.0
 
     if not row.empty:
@@ -186,7 +181,7 @@ def main():
             st.warning("Veuillez saisir au moins un montant.")
             return
 
-        # 1. On récupère LA GRILLE complète pour ce profil (sans filtrer par CA tout de suite)
+        # 1. On récupère LA GRILLE complète pour ce profil
         mask = (df['CLUSTER'] == choix_cluster) & (df['APPROVISIONNEMENT'] == choix_appro)
         df_grid = df[mask]
 
@@ -203,31 +198,23 @@ def main():
             taux_moy_25 = marge_2025 / total_ca
 
             # --- B. STRATEGIE 2026 (Basé sur des CA PROJETÉS 70/30) ---
-            
-            # 1. On calcule les volumes projetés
             vol_winner_70 = total_ca * 0.70
             vol_loser_30 = total_ca * 0.30
 
-            # 2. On regarde qui gagnerait SI on lui donnait 70% du volume
-            # On va chercher le taux dans la grille correspondant à ce volume "boosté"
+            # On regarde qui gagnerait SI on lui donnait 70% du volume
             rate_nestle_if_win = get_rate_from_grid(df_grid, vol_winner_70, "NESTLE_2026")
             rate_nutricia_if_win = get_rate_from_grid(df_grid, vol_winner_70, "NUTRICIA_2026")
 
-            # 3. Duel : Qui a le meilleur taux à 70% de part de marché ?
+            # Duel : Qui a le meilleur taux à 70% de part de marché ?
             if rate_nestle_if_win >= rate_nutricia_if_win:
                 win, lose = "NESTLE", "NUTRICIA"
-                # Le gagnant (Nestle) prend son taux de "Gros Faiseur" (vol 70%)
                 t_win = rate_nestle_if_win
-                # Le perdant (Nutricia) prend son taux de "Petit Faiseur" (vol 30%)
                 t_lose = get_rate_from_grid(df_grid, vol_loser_30, "NUTRICIA_2026")
             else:
                 win, lose = "NUTRICIA", "NESTLE"
-                # Le gagnant (Nutricia) prend son taux de "Gros Faiseur"
                 t_win = rate_nutricia_if_win
-                # Le perdant (Nestle) prend son taux de "Petit Faiseur"
                 t_lose = get_rate_from_grid(df_grid, vol_loser_30, "NESTLE_2026")
             
-            # 4. Taux Mixte 2026
             taux_strat_26 = (0.7 * t_win) + (0.3 * t_lose)
             diff = taux_strat_26 - taux_moy_25
             gain_10k = diff * 10000
@@ -288,17 +275,16 @@ def main():
                     **🏆 Le GAGNANT ({win})**
                     * Volume projeté : **{vol_winner_70:,.0f} €**
                     * Taux correspondant dans la grille : **{t_win:.2%}**
-                    * *Note : Taux bonifié grâce au gros volume.*
                     """)
                 with col_d2:
                     st.markdown(f"""
                     **💀 Le PERDANT ({lose})**
                     * Volume projeté : **{vol_loser_30:,.0f} €**
                     * Taux correspondant dans la grille : **{t_lose:.2%}**
-                    * *Note : Taux plus faible car petit volume.*
                     """)
                 
-                st.latex(rf"\text{{Taux Final}} = (0.7 \times {t_win:.2\%}) + (0.3 \times {t_lose:.2\%}) = \mathbf{{{taux_strat_26:.2\%}}}")
+                # CORRECTION DE L'ERREUR D'AFFICHAGE LATEX ICI
+                st.latex(rf"\text{{Taux Final}} = (0.7 \times {t_win*100:.2f}\%) + (0.3 \times {t_lose*100:.2f}\%) = \mathbf{{{taux_strat_26*100:.2f}\%}}")
 
 if __name__ == "__main__":
     main()
