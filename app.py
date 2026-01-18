@@ -157,7 +157,7 @@ def main():
             }
             /* C'est ici que la magie opère : on décale l'image un peu à droite */
             div[data-testid="stImage"] > img {
-                transform: translateX(140px); 
+                transform: translateX(200px); 
             }
             h1 {
                 text-align: center;
