@@ -112,24 +112,14 @@ def load_data():
 
 # --- 4. FONCTION DE RECHERCHE DE TAUX ---
 def get_rate_from_grid(df_grid, turnover, col_name):
-    """
-    Cherche le taux dans la grille correspondant exactement au CA fourni.
-    """
-    if turnover <= 0:
-        return 0.0
-    
-    # On filtre la ligne où CA mini <= turnover <= CA maxi
+    if turnover <= 0: return 0.0
     row = df_grid[(df_grid['CA mini'] <= turnover) & (df_grid['CA maxi'] >= turnover)]
-    
-    # Gestion des cas hors tranches
     if row.empty:
         max_limit = df_grid['CA maxi'].max()
         if turnover > max_limit:
-            # On prend la dernière tranche (la plus haute)
             row = df_grid[df_grid['CA maxi'] == max_limit]
         else:
             return 0.0
-
     if not row.empty:
         return row.iloc[0].get(col_name, 0.0)
     return 0.0
@@ -137,17 +127,11 @@ def get_rate_from_grid(df_grid, turnover, col_name):
 # --- 5. INTERFACE ---
 def main():
     
-    # --- MISE EN PAGE DU HEADER (Modifié pour alignement "g") ---
-    # On injecte du CSS pour :
-    # 1. Centrer le texte H1
-    # 2. Centrer l'image MAIS la décaler de 40px vers la droite (transform: translateX) pour l'aligner avec le "g"
+    # --- CSS ---
     st.markdown("""
         <style>
             [data-testid="stAppViewContainer"] > .main {
                 padding-top: 2rem;
-            }
-            .header-container {
-                text-align: center;
             }
             div[data-testid="stImage"] {
                 display: block;
@@ -155,9 +139,8 @@ def main():
                 margin-right: auto;
                 text-align: center;
             }
-            /* C'est ici que la magie opère : on décale l'image un peu à droite */
             div[data-testid="stImage"] > img {
-                transform: translateX(200px); 
+                transform: translateX(120px); 
             }
             h1 {
                 text-align: center;
@@ -167,14 +150,14 @@ def main():
         </style>
     """, unsafe_allow_html=True)
 
-    # Affichage du Logo et Titre sans colonnes pour un centrage absolu
+    # Affichage
     if os.path.exists(NOM_FICHIER_LOGO):
         st.image(NOM_FICHIER_LOGO, width=350)
     st.markdown("<h1>Stratégie catégorielle CNO</h1>", unsafe_allow_html=True)
     
     st.markdown("---")
 
-    # --- LOGIQUE DE L'APP ---
+    # --- LOGIQUE ---
     df, error_msg = load_data()
     if df is None:
         st.error("❌ Erreur chargement fichier.")
@@ -210,14 +193,13 @@ def main():
             st.warning("Veuillez saisir au moins un montant.")
             return
 
-        # 1. On récupère LA GRILLE complète pour ce profil
         mask = (df['CLUSTER'] == choix_cluster) & (df['APPROVISIONNEMENT'] == choix_appro)
         df_grid = df[mask]
 
         if df_grid.empty:
             st.error(f"Aucune grille trouvée pour : {choix_cluster} / {choix_appro}")
         else:
-            # --- A. CALCUL 2025 ---
+            # 2025
             r_n25 = get_rate_from_grid(df_grid, ca_nestle, "NESTLE_2025")
             r_l25 = get_rate_from_grid(df_grid, ca_lactalis, "LACTALIS_2025")
             r_u25 = get_rate_from_grid(df_grid, ca_nutricia, "NUTRICIA_2025")
@@ -226,7 +208,7 @@ def main():
             marge_2025 = (ca_nestle*r_n25) + (ca_lactalis*r_l25) + (ca_nutricia*r_u25) + (ca_fresenius*r_f25)
             taux_moy_25 = marge_2025 / total_ca
 
-            # --- B. STRATEGIE 2026 ---
+            # 2026
             vol_winner_70 = total_ca * 0.70
             vol_loser_30 = total_ca * 0.30
 
@@ -246,7 +228,7 @@ def main():
             diff = taux_strat_26 - taux_moy_25
             gain_10k = diff * 10000
 
-            # --- AFFICHAGE ---
+            # Affichage
             st.markdown("---")
             k1, k2, k3 = st.columns(3)
             with k1:
@@ -257,11 +239,12 @@ def main():
                 st.info("🎯 Projection 2026")
                 st.write(f"**70% {win}** / 30% {lose}")
                 st.metric("Nouveau Taux", f"{taux_strat_26:.2%}")
-                st.caption(f"Basé sur un volume gagnant de {vol_winner_70:,.0f}€")
+                st.caption(f"Basé sur un volume Numéro 1 de {vol_winner_70:,.0f}€")
             with k3:
                 if diff > 0:
                     st.success("🚀 Gain de Marge")
-                    st.metric("Gain / 10k€ Vente", f"+{gain_10k:,.2f} €")
+                    # AJOUT DE "+ Incentive" ICI
+                    st.metric("Gain / 10k€ Vente", f"+{gain_10k:,.2f} € + Incentive")
                 elif diff == 0:
                     st.warning("⚖️ Stable")
                     st.metric("Gain", "0 €")
@@ -270,7 +253,7 @@ def main():
                     st.metric("Perte / 10k€ Vente", f"{gain_10k:,.2f} €")
                 st.write(f"Évolution: {diff:+.2%}")
 
-            # --- DÉTAILS DYNAMIQUES ---
+            # Détails
             st.markdown("<br>", unsafe_allow_html=True)
             with st.expander("🔎 DÉTAILS DES CALCULS (JUSTIFICATION)", expanded=True):
                 
@@ -292,23 +275,23 @@ def main():
                 st.markdown("---")
                 
                 st.markdown("### 2. Simulation 2026 (Projection)")
-                st.write(f"Hypothèse : Vous basculez **70%** de votre CA total ({total_ca:,.0f} €) sur le gagnant.")
+                st.write(f"Hypothèse : Vous basculez **70%** de votre CA total ({total_ca:,.0f} €) sur le Numéro 1.")
                 
+                # MODIFICATION DES TITRES ICI
                 col_d1, col_d2 = st.columns(2)
                 with col_d1:
                     st.markdown(f"""
-                    **🏆 Le GAGNANT ({win})**
+                    **🥇 Numéro 1 ({win})**
                     * Volume projeté : **{vol_winner_70:,.0f} €**
                     * Taux correspondant dans la grille : **{t_win:.2%}**
                     """)
                 with col_d2:
                     st.markdown(f"""
-                    **💀 Le PERDANT ({lose})**
+                    **🥈 Numéro 2 ({lose})**
                     * Volume projeté : **{vol_loser_30:,.0f} €**
                     * Taux correspondant dans la grille : **{t_lose:.2%}**
                     """)
                 
-                # Formule corrigée pour éviter l'erreur LaTeX
                 st.latex(rf"\text{{Taux Final}} = (0.7 \times {t_win*100:.2f}\%) + (0.3 \times {t_lose*100:.2f}\%) = \mathbf{{{taux_strat_26*100:.2f}\%}}")
 
 if __name__ == "__main__":
