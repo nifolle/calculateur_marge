@@ -41,11 +41,13 @@ def load_data():
             except:
                 continue
 
-    # Nettoyage et Renommage des colonnes
+    # Nettoyage et Renommage des colonnes (Structure V11 avec Fresenius)
     if df is not None:
         try:
-            # On s'assure d'avoir assez de colonnes pour les 4 laboratoires sur 2 années
-            # Structure attendue : Cluster, Appro, Min, Max, N26, L26, U26, F26, N25, L25, U25, F25
+            # On s'attend à 12 colonnes de base : 
+            # 0:Cluster, 1:Appro, 2:Min, 3:Max, 
+            # 4:N26, 5:L26, 6:U26, 7:F26
+            # 8:N25, 9:L25, 10:U25, 11:F25
             if len(df.columns) >= 12:
                 df.columns = [
                     "CLUSTER",             # 0
@@ -55,14 +57,14 @@ def load_data():
                     "NESTLE_2026",         # 4
                     "LACTALIS_2026",       # 5
                     "NUTRICIA_2026",       # 6
-                    "FRESENIUS_2026",      # 7 (Nouveau)
+                    "FRESENIUS_2026",      # 7
                     "NESTLE_2025",         # 8
                     "LACTALIS_2025",       # 9
                     "NUTRICIA_2025",       # 10
-                    "FRESENIUS_2025"       # 11 (Nouveau)
+                    "FRESENIUS_2025"       # 11
                 ] + list(df.columns[12:])
 
-            # Liste complète des colonnes à nettoyer
+            # Nettoyage des chiffres
             cols_to_clean = [
                 "NESTLE_2026", "LACTALIS_2026", "NUTRICIA_2026", "FRESENIUS_2026",
                 "NESTLE_2025", "LACTALIS_2025", "NUTRICIA_2025", "FRESENIUS_2025"
@@ -111,66 +113,72 @@ def main():
 
     df = load_data()
     if df is None:
-        st.error("❌ Erreur technique : Fichier introuvable ou format incorrect.")
+        st.error("❌ Erreur technique : Fichier 'data.csv' introuvable.")
         return 
 
     # --- FORMULAIRE ---
-    st.subheader("🔎 Répartition de votre Chiffre d'Affaires 2025")
+    st.subheader("1️⃣ Profil de la Pharmacie")
     
-    # Choix Cluster / Appro
+    # SÉLECTEURS DE PROFIL (La base du calcul)
     c_clust, c_appro = st.columns(2)
     with c_clust:
+        # Récupération des clusters uniques dans le fichier
         valeurs_cluster = sorted(df['CLUSTER'].dropna().astype(str).unique())
-        choix_cluster = st.selectbox("Votre Cluster", valeurs_cluster)
+        choix_cluster = st.selectbox("Sélectionnez votre Cluster", valeurs_cluster)
     with c_appro:
+        # Récupération des modes d'approvisionnement uniques
         valeurs_appro = sorted(df['APPROVISIONNEMENT'].dropna().astype(str).unique())
-        choix_appro = st.selectbox("Mode d'approvisionnement", valeurs_appro)
+        choix_appro = st.selectbox("Mode d'approvisionnement (Commun aux 4 laboratoires)", valeurs_appro)
 
-    st.write("Veuillez saisir vos volumes d'achats 2025 par laboratoire :")
+    st.markdown("---")
+    st.subheader("2️⃣ Répartition des Achats 2025")
+    st.write("Saisissez le chiffre d'affaires réalisé avec chaque laboratoire :")
 
-    # 4 Inputs pour les CA
+    # SAISIE DES 4 CA
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        ca_nestle = st.number_input("CA Nestle 2025 (€)", min_value=0.0, step=100.0)
+        ca_nestle = st.number_input("CA Nestle (€)", min_value=0.0, step=100.0)
     with col2:
-        ca_lactalis = st.number_input("CA Lactalis 2025 (€)", min_value=0.0, step=100.0)
+        ca_lactalis = st.number_input("CA Lactalis (€)", min_value=0.0, step=100.0)
     with col3:
-        ca_nutricia = st.number_input("CA Nutricia 2025 (€)", min_value=0.0, step=100.0)
+        ca_nutricia = st.number_input("CA Nutricia (€)", min_value=0.0, step=100.0)
     with col4:
-        ca_fresenius = st.number_input("CA Fresenius 2025 (€)", min_value=0.0, step=100.0)
+        ca_fresenius = st.number_input("CA Fresenius (€)", min_value=0.0, step=100.0)
 
     # Calcul du CA Total instantané
     total_ca_2025 = ca_nestle + ca_lactalis + ca_nutricia + ca_fresenius
+    
     if total_ca_2025 > 0:
-        st.info(f"💰 Chiffre d'Affaires Total 2025 pris en compte : **{total_ca_2025:,.2f} €**")
-
+        st.info(f"💰 Chiffre d'Affaires Total 2025 : **{total_ca_2025:,.2f} €**")
+    
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # --- CALCUL ---
-    if st.button("📊 Lancer l'analyse et la projection 2026", type="primary", use_container_width=True):
+    # --- ACTION ---
+    if st.button("📊 Analyser la performance", type="primary", use_container_width=True):
         
         if total_ca_2025 == 0:
-            st.warning("Veuillez saisir au moins un chiffre d'affaires.")
+            st.warning("Veuillez saisir au moins un montant de chiffre d'affaires.")
             return
 
-        # 1. Récupération de la ligne (Basé sur le CA TOTAL)
-        mask = (df['CLUSTER'].astype(str) == choix_cluster) & (df['APPROVISIONNEMENT'].astype(str) == choix_appro)
-        df_filtre = df[mask]
+        # 1. FILTRAGE PRINCIPAL (Cluster + Appro)
+        # On ne garde que les lignes qui correspondent au choix de l'utilisateur
+        mask_profil = (df['CLUSTER'].astype(str) == choix_cluster) & (df['APPROVISIONNEMENT'].astype(str) == choix_appro)
+        df_filtre = df[mask_profil]
 
         if df_filtre.empty:
-            st.warning("Profil Cluster/Appro introuvable.")
+            st.warning(f"Aucun tarif trouvé pour le profil : {choix_cluster} en {choix_appro}.")
         else:
-            # On cherche la tranche correspondant au CA TOTAL
+            # 2. FILTRAGE PAR TRANCHE DE CA
+            # On cherche la ligne où CA Total est compris entre Min et Max
             mask_ca = (df_filtre['CA mini'] <= total_ca_2025) & (df_filtre['CA maxi'] >= total_ca_2025)
             resultat = df_filtre[mask_ca]
 
             if resultat.empty:
-                st.warning(f"Le CA Total ({total_ca_2025}€) ne correspond à aucune tranche dans le fichier.")
+                st.warning(f"Le CA Total ({total_ca_2025:,.0f}€) est hors des tranches prévues (trop bas ou trop haut).")
             else:
                 row = resultat.iloc[0]
 
-                # --- A. CALCUL MARGE MOYENNE 2025 (Pondérée) ---
-                # On récupère les taux 2025 (si -1.0 ou vide, on compte 0%)
+                # --- A. CALCUL MOYENNE 2025 (Pondérée par vos CA réels) ---
                 def get_rate(col_name):
                     val = row.get(col_name, -1.0)
                     return val if val > 0 else 0.0
@@ -188,62 +196,59 @@ def main():
                     (ca_fresenius * r_fresenius_25)
                 )
                 
-                # Taux moyen 2025
+                # Taux moyen 2025 (Marge Totale / CA Total)
                 taux_moyen_2025 = marge_euros_2025 / total_ca_2025
 
                 # --- B. PROJECTION 2026 (Stratégie 70/30 Nestle vs Nutricia) ---
-                # On ne regarde QUE Nestle et Nutricia pour 2026
+                # Comparaison uniquement entre Nestle et Nutricia
                 r_nestle_26 = get_rate("NESTLE_2026")
                 r_nutricia_26 = get_rate("NUTRICIA_2026")
 
                 if r_nestle_26 >= r_nutricia_26:
-                    labo_principal = "NESTLE"
-                    labo_secondaire = "NUTRICIA"
+                    labo_gagnant = "NESTLE"
+                    labo_perdant = "NUTRICIA"
                     taux_prin = r_nestle_26
                     taux_sec = r_nutricia_26
                 else:
-                    labo_principal = "NUTRICIA"
-                    labo_secondaire = "NESTLE"
+                    labo_gagnant = "NUTRICIA"
+                    labo_perdant = "NESTLE"
                     taux_prin = r_nutricia_26
                     taux_sec = r_nestle_26
 
-                # Calcul du taux mixte théorique (70% gagnant + 30% perdant)
+                # Taux mixte théorique : 70% sur le gagnant, 30% sur le perdant
                 taux_strategie_2026 = (0.7 * taux_prin) + (0.3 * taux_sec)
 
-                # --- C. DIFFÉRENTIEL ---
+                # --- C. RÉSULTATS ---
                 diff_taux = taux_strategie_2026 - taux_moyen_2025
                 gain_pour_10k = diff_taux * 10000
 
                 # --- D. AFFICHAGE ---
                 st.markdown("---")
                 
-                # Colonnes de résultats
                 kpi1, kpi2, kpi3 = st.columns(3)
 
                 with kpi1:
-                    st.info("🔙 Moyenne Pondérée 2025")
-                    st.write("Basée sur vos 4 fournisseurs :")
-                    st.metric("Marge Moyenne", f"{taux_moyen_2025:.2%}")
-                    st.caption(f"(Soit env. {marge_euros_2025:,.0f}€ de marge générée)")
+                    st.info("🔙 Historique 2025 (Réel)")
+                    st.metric("Marge Moyenne Pondérée", f"{taux_moyen_2025:.2%}")
+                    st.caption("Calculée sur la répartition exacte de vos 4 fournisseurs.")
 
                 with kpi2:
-                    st.info("🎯 Stratégie Cible 2026")
-                    st.write(f"**70% {labo_principal} / 30% {labo_secondaire}**")
+                    st.info("🎯 Projection 2026 (Optimisée)")
+                    st.write(f"Hypothèse : **70% {labo_gagnant}** / 30% {labo_perdant}")
                     st.metric("Nouveau Taux Mixte", f"{taux_strategie_2026:.2%}")
-                    st.caption(f"Basé sur {labo_principal}: {taux_prin:.2%} et {labo_secondaire}: {taux_sec:.2%}")
 
                 with kpi3:
                     if diff_taux > 0:
-                        st.success("🚀 Gain de performance")
-                        st.metric("Gain / 10k€ de Vente", f"+ {gain_pour_10k:,.2f} €")
-                        st.write(f"Évolution taux : **+{diff_taux:.2%}**")
+                        st.success("🚀 Gain de Performance")
+                        st.metric("Gain par 10k€ de Vente", f"+ {gain_pour_10k:,.2f} €")
+                        st.write(f"Évolution du taux : **+{diff_taux:.2%}**")
                     elif diff_taux == 0:
-                        st.warning("⚖️ Performance identique")
-                        st.metric("Gain / 10k€ de Vente", "0 €")
+                        st.warning("⚖️ Performance Stable")
+                        st.metric("Gain par 10k€ de Vente", "0 €")
                     else:
-                        st.error("📉 Baisse mécanique")
-                        st.metric("Perte / 10k€ de Vente", f"{gain_pour_10k:,.2f} €")
-                        st.write(f"Évolution taux : **{diff_taux:.2%}**")
+                        st.error("📉 Perte Mécanique")
+                        st.metric("Perte par 10k€ de Vente", f"{gain_pour_10k:,.2f} €")
+                        st.write(f"Évolution du taux : **{diff_taux:.2%}**")
 
 if __name__ == "__main__":
     main()
