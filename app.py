@@ -11,13 +11,14 @@ NOM_FICHIER_LOGO = "logo.png"
 # --- 2. FONCTIONS DE NETTOYAGE ---
 
 def clean_currency(val):
-    """Convertit n'importe quel format de chiffre (texte avec €, espace, ou nombre pur) en float"""
+    """Nettoie les montants (enlève €, espaces, et convertit en chiffre)"""
     if pd.isna(val): return 0.0
-    if isinstance(val, (int, float)): return float(val) # Si c'est déjà un nombre
+    if isinstance(val, (int, float)): return float(val)
     
     s = str(val).strip()
-    s = s.replace('€', '').replace(' ', '').replace('\xa0', '') # Enlever devise et espaces (y compris insécables)
-    s = s.replace(',', '.')                 # Virgule -> Point
+    # On enlève le symbole euro et tous les types d'espaces
+    s = s.replace('€', '').replace(' ', '').replace('\xa0', '') 
+    s = s.replace(',', '.') # Virgule -> Point
     if s in ['-', '']: return 0.0
     try:
         return float(s)
@@ -25,14 +26,14 @@ def clean_currency(val):
         return 0.0
 
 def clean_rate(val):
-    """Convertit '0,25', '0.25' ou 'NON ELIGIBLE' en float"""
+    """Nettoie les taux (gère les %, les virgules et le texte)"""
     if pd.isna(val): return 0.0
     if isinstance(val, (int, float)): return float(val)
 
     s = str(val).strip().upper()
-    s = s.replace(',', '.')
+    s = s.replace(',', '.') # Virgule -> Point
     
-    # Règle des 12%
+    # Règle spécifique demandée : NON ELIGIBLE = 12%
     if "NON ELIGIBLE" in s:
         return 0.12 
     try:
@@ -40,56 +41,62 @@ def clean_rate(val):
     except:
         return 0.0
 
-# --- 3. CHARGEMENT INTELLIGENT (Spécial V15) ---
+# --- 3. CHARGEMENT ET PRÉPARATION ---
 @st.cache_data
 def load_data():
-    if not os.path.exists(NOM_FICHIER_DATA):
-        return None
+    # On cherche le fichier data.csv (ou le nom long si oublié)
+    target = NOM_FICHIER_DATA
+    if not os.path.exists(target):
+        # Petit filet de sécurité : si data.csv n'existe pas, on cherche un autre csv
+        files = [f for f in os.listdir() if f.endswith(".csv") and "COMPARATIF" in f]
+        if files: target = files[0]
+        else: return None
 
     df = None
     try:
-        # V15 : Les titres sont sur la ligne 2 (donc header=1 en python qui commence à 0)
-        # On essaie d'abord la virgule (standard CSV)
-        df = pd.read_csv(NOM_FICHIER_DATA, header=1, sep=',', encoding='latin-1')
+        # TENTATIVE 1 : Lecture standard avec virgule (cas de votre fichier V15)
+        # header=1 signifie que la ligne 2 du fichier contient les titres (Cluster, Appro...)
+        df = pd.read_csv(target, header=1, sep=',', encoding='latin-1')
         
-        # Si ça a mal lu (tout dans une colonne), on essaie le point-virgule
+        # Si la lecture échoue (tout dans 1 colonne), on essaie le point-virgule
         if df.shape[1] < 5:
-            df = pd.read_csv(NOM_FICHIER_DATA, header=1, sep=';', encoding='latin-1')
+            df = pd.read_csv(target, header=1, sep=';', encoding='latin-1')
+            
     except Exception as e:
-        st.error(f"Erreur lecture CSV: {e}")
+        st.error(f"Erreur de lecture du fichier : {e}")
         return None
 
     if df is not None:
-        # RENOMMAGE DES COLONNES PAR POSITION
-        # Le fichier V15 a des doublons de noms (NESTLE apparaît pour 2026 et 2025).
-        # On force les noms pour éviter la confusion.
+        # RENOMMAGE DES COLONNES PAR POSITION (CRUCIAL POUR V15)
+        # La V15 a des colonnes avec le même nom pour 2026 et 2025. 
+        # Pandas les renomme automatiquement (ex: NESTLE, NESTLE.1).
+        # On va forcer nos propres noms pour être sûr.
         if len(df.columns) >= 12:
-            new_columns = list(df.columns)
-            # Colonnes 0 à 3 : Contexte
-            new_columns[0] = "CLUSTER"
-            new_columns[1] = "APPROVISIONNEMENT"
-            new_columns[2] = "CA mini"
-            new_columns[3] = "CA maxi"
-            # Colonnes 4 à 7 : 2026
-            new_columns[4] = "NESTLE_2026"
-            new_columns[5] = "LACTALIS_2026"
-            new_columns[6] = "NUTRICIA_2026"
-            new_columns[7] = "FRESENIUS_2026"
-            # Colonnes 8 à 11 : 2025
-            new_columns[8] = "NESTLE_2025"
-            new_columns[9] = "LACTALIS_2025"
-            new_columns[10] = "NUTRICIA_2025"
-            new_columns[11] = "FRESENIUS_2025"
+            new_cols = list(df.columns)
+            new_cols[0] = "CLUSTER"
+            new_cols[1] = "APPROVISIONNEMENT"
+            new_cols[2] = "CA mini"
+            new_cols[3] = "CA maxi"
+            # 2026 (Première série)
+            new_cols[4] = "NESTLE_2026"
+            new_cols[5] = "LACTALIS_2026"
+            new_cols[6] = "NUTRICIA_2026"
+            new_cols[7] = "FRESENIUS_2026"
+            # 2025 (Deuxième série)
+            new_cols[8] = "NESTLE_2025"
+            new_cols[9] = "LACTALIS_2025"
+            new_cols[10] = "NUTRICIA_2025"
+            new_cols[11] = "FRESENIUS_2025"
             
-            df.columns = new_columns
+            df.columns = new_cols
 
-        # NETTOYAGE TEXTE (Cluster/Appro) pour le filtrage
+        # NETTOYAGE DES TEXTES (Pour que les filtres marchent)
         if "CLUSTER" in df.columns:
             df['CLUSTER'] = df['CLUSTER'].astype(str).str.strip()
         if "APPROVISIONNEMENT" in df.columns:
             df['APPROVISIONNEMENT'] = df['APPROVISIONNEMENT'].astype(str).str.strip()
         
-        # NETTOYAGE CHIFFRES (CA et TAUX)
+        # NETTOYAGE DES CHIFFRES
         for col in ["CA mini", "CA maxi"]:
             if col in df.columns:
                 df[col] = df[col].apply(clean_currency)
@@ -107,7 +114,7 @@ def load_data():
 
 # --- 4. INTERFACE ---
 def main():
-    # Centrage Logo
+    # Style (Logo centré)
     st.markdown("""<style>[data-testid="stImage"]{display: block; margin-left: auto; margin-right: auto;}</style>""", unsafe_allow_html=True)
 
     c1, c2, c3 = st.columns([1,2,1])
@@ -119,15 +126,15 @@ def main():
 
     df = load_data()
     if df is None:
-        st.error("❌ Fichier 'data.csv' introuvable.")
+        st.error("❌ Impossible de charger les données. Vérifiez que 'data.csv' est bien présent.")
         return
 
-    # --- ÉTAPE 1 : CHOIX IMPOSÉS ---
+    # --- ÉTAPE 1 : CHOIX DU PROFIL ---
     st.subheader("1️⃣ Profil Pharmacie")
     col_a, col_b = st.columns(2)
     
     with col_a:
-        # Listes fixes comme demandé
+        # On impose les choix comme demandé
         choix_cluster = st.selectbox("Cluster", ["Aprium", "UM/Monge"])
     with col_b:
         choix_appro = st.selectbox("Mode d'Approvisionnement", ["Direct", "Grossiste"])
@@ -149,29 +156,27 @@ def main():
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # --- ÉTAPE 3 : CALCUL ---
+    # --- ÉTAPE 3 : ANALYSE ---
     if st.button("📊 Analyser la performance", type="primary", use_container_width=True):
         if total_ca == 0:
             st.warning("Veuillez saisir au moins un montant.")
             return
 
-        # 1. FILTRE CLUSTER / APPRO
+        # 1. FILTRAGE
         mask = (df['CLUSTER'] == choix_cluster) & (df['APPROVISIONNEMENT'] == choix_appro)
         df_filtre = df[mask]
 
         if df_filtre.empty:
-            st.error(f"Pas de données trouvées dans le fichier pour : {choix_cluster} / {choix_appro}")
+            st.error(f"Aucune donnée trouvée pour : {choix_cluster} / {choix_appro}")
         else:
-            # 2. FILTRE TRANCHE CA
+            # 2. TRANCHE CA
             mask_ca = (df_filtre['CA mini'] <= total_ca) & (df_filtre['CA maxi'] >= total_ca)
             res = df_filtre[mask_ca]
 
             if res.empty:
-                st.warning(f"Le CA Total ({total_ca:,.0f}€) ne correspond à aucune tranche (Min/Max) dans le fichier.")
+                st.warning(f"Le CA Total ({total_ca:,.0f}€) est hors des tranches prévues (Min/Max).")
             else:
                 row = res.iloc[0]
-
-                # --- CALCULS ---
 
                 # A. MOYENNE 2025 (Pondérée Réelle)
                 r_n25 = row.get("NESTLE_2025", 0.0)
@@ -186,7 +191,7 @@ def main():
                 r_n26 = row.get("NESTLE_2026", 0.0)
                 r_u26 = row.get("NUTRICIA_2026", 0.0)
 
-                # Comparaison
+                # Qui gagne ?
                 if r_n26 >= r_u26:
                     win, lose = "NESTLE", "NUTRICIA"
                     t_win, t_lose = r_n26, r_u26
@@ -201,13 +206,13 @@ def main():
                 diff = taux_strat_26 - taux_moy_25
                 gain_10k = diff * 10000
 
-                # --- AFFICHAGE ---
+                # D. AFFICHAGE
                 st.markdown("---")
                 k1, k2, k3 = st.columns(3)
                 with k1:
                     st.info("🔙 Moyenne 2025 (Réel)")
                     st.metric("Taux Actuel", f"{taux_moy_25:.2%}")
-                    st.caption("Pondérée sur vos 4 labos")
+                    st.caption("Moyenne pondérée de vos 4 labos")
                 with k2:
                     st.info("🎯 Projection 2026")
                     st.write(f"**70% {win}** / 30% {lose}")
