@@ -6,7 +6,7 @@ import io
 # --- 1. CONFIGURATION ---
 st.set_page_config(page_title="Stratégie CNO", layout="wide")
 
-NOM_FICHIER_DATA = "data.csv"
+NOM_FICHIER_DATA = "data.csv" # Le code cherchera aussi les .xlsx
 NOM_FICHIER_LOGO = "logo.png"
 
 # --- 2. FONCTIONS DE NETTOYAGE ---
@@ -27,61 +27,72 @@ def clean_rate(val):
     try: return float(s)
     except: return 0.0
 
-# --- 3. CHARGEMENT ULTRA-ROBUSTE ---
+# --- 3. CHARGEMENT HYBRIDE (EXCEL + CSV) ---
 @st.cache_data
 def load_data():
+    # 1. Recherche du fichier (CSV ou XLSX)
     target = NOM_FICHIER_DATA
     if not os.path.exists(target):
-        files = [f for f in os.listdir() if f.endswith(".csv") and "COMPARATIF" in f]
-        if files: target = files[0]
+        # On cherche n'importe quel fichier ressemblant à des données
+        files = [f for f in os.listdir() if "COMPARATIF" in f or "data" in f]
+        # On priorise les fichiers data si possible
+        valid_files = [f for f in files if f.endswith(".xlsx") or f.endswith(".csv")]
+        if valid_files: target = valid_files[0]
         else: return None, "Fichier introuvable"
 
-    # Liste des encodages probables (Excel FR, Excel Unicode, Standard Web)
-    encodings_to_try = ['latin-1', 'utf-8', 'utf-16', 'cp1252']
-    
     df = None
-    debug_lines = [] # Pour afficher à l'utilisateur si ça plante
+    debug_msg = ""
 
-    for encoding in encodings_to_try:
+    # --- TENTATIVE 1 : LECTURE EXCEL (Prioritaire vu votre erreur PK) ---
+    try:
+        # On charge sans en-tête pour trouver la ligne "CLUSTER"
+        # engine='openpyxl' est nécessaire pour les .xlsx
+        df_temp = pd.read_excel(target, header=None, engine='openpyxl')
+        
+        # On cherche la ligne qui contient "CLUSTER"
+        header_idx = -1
+        for i, row in df_temp.iterrows():
+            row_str = row.astype(str).str.cat(sep=' ').upper()
+            if "CLUSTER" in row_str and "APPROVISIONNEMENT" in row_str:
+                header_idx = i
+                break
+        
+        if header_idx != -1:
+            # On recharge proprement avec le bon header
+            df = pd.read_excel(target, header=header_idx, engine='openpyxl')
+        
+    except Exception as e_excel:
+        debug_msg += f"Excel fail: {e_excel}. "
+        # --- TENTATIVE 2 : LECTURE CSV (Fallback) ---
         try:
-            with open(target, 'r', encoding=encoding) as f:
-                lines = f.readlines()
-            
-            if not lines: continue
-
-            # Recherche de la ligne Header
-            header_idx = -1
-            separator = ','
-            
-            for i, line in enumerate(lines):
-                # On nettoie la ligne pour la comparaison
-                line_upper = line.upper()
-                # Critère souple : on cherche juste "CLUSTER"
-                if "CLUSTER" in line_upper:
-                    header_idx = i
-                    # Détection séparateur
-                    if line.count(';') > line.count(','): separator = ';'
-                    else: separator = ','
-                    break
-            
-            if header_idx != -1:
-                # On a trouvé ! On charge.
-                clean_content = "".join(lines[header_idx:])
-                df = pd.read_csv(io.StringIO(clean_content), sep=separator)
-                break # Sortir de la boucle d'encodages
-            else:
-                # On garde une trace des lignes pour le debug si c'est le dernier essai
-                if encoding == encodings_to_try[0]: 
-                    debug_lines = lines[:5]
-
-        except Exception:
-            continue
+            encodings = ['latin-1', 'utf-8', 'cp1252']
+            for encoding in encodings:
+                try:
+                    with open(target, 'r', encoding=encoding) as f:
+                        lines = f.readlines()
+                    
+                    # Recherche header
+                    header_idx = -1
+                    sep = ','
+                    for i, line in enumerate(lines):
+                        if "CLUSTER" in line.upper():
+                            header_idx = i
+                            if line.count(';') > line.count(','): sep = ';'
+                            break
+                    
+                    if header_idx != -1:
+                        clean_content = "".join(lines[header_idx:])
+                        df = pd.read_csv(io.StringIO(clean_content), sep=sep)
+                        break
+                except: continue
+        except Exception as e_csv:
+            debug_msg += f"CSV fail: {e_csv}"
 
     if df is not None:
-        # Renommage et nettoyage standard
+        # --- NORMALISATION DES COLONNES ---
+        # On s'assure d'avoir les 12 colonnes attendues
         if len(df.columns) >= 12:
             new_cols = list(df.columns)
-            # Mapping forcé pour éviter les erreurs de noms
             new_cols[0] = "CLUSTER"
             new_cols[1] = "APPROVISIONNEMENT"
             new_cols[2] = "CA mini"
@@ -96,11 +107,13 @@ def load_data():
             new_cols[11] = "FRESENIUS_2025"
             df.columns = new_cols
 
+        # Conversion forcée String
         if "CLUSTER" in df.columns:
             df['CLUSTER'] = df['CLUSTER'].astype(str).str.strip()
         if "APPROVISIONNEMENT" in df.columns:
             df['APPROVISIONNEMENT'] = df['APPROVISIONNEMENT'].astype(str).str.strip()
         
+        # Nettoyage Données
         for col in ["CA mini", "CA maxi"]:
             if col in df.columns: df[col] = df[col].apply(clean_currency)
         
@@ -113,8 +126,7 @@ def load_data():
             
         return df, None
 
-    # Si on arrive ici, c'est que rien n'a marché
-    return None, debug_lines
+    return None, debug_msg
 
 # --- 4. INTERFACE ---
 def main():
@@ -128,23 +140,16 @@ def main():
     st.markdown("---")
 
     # Chargement
-    df, error_info = load_data()
+    df, error_msg = load_data()
 
-    # GESTION DES ERREURS D'AFFICHAGE
     if df is None:
-        st.error("❌ Échec critique : Impossible de lire le fichier.")
-        
-        if isinstance(error_info, list) and len(error_info) > 0:
-            st.warning("🧐 Voici ce que le programme voit dans votre fichier (5 premières lignes). Si c'est illisible, le fichier est corrompu ou crypté.")
-            st.code("".join(error_info), language="text")
-            st.markdown("**Conseil :** Vérifiez que la colonne s'appelle bien `CLUSTER`.")
-        elif error_info == "Fichier introuvable":
-             st.error("Le fichier 'data.csv' est introuvable.")
-        else:
-            st.error("Erreur inconnue. Essayez d'ouvrir le CSV dans Excel et de le ré-enregistrer en 'CSV (séparateur: point-virgule)'.")
+        st.error("❌ Impossible de lire le fichier (ni en Excel, ni en CSV).")
+        if error_msg:
+            st.warning(f"Détails techniques : {error_msg}")
+        st.info("💡 Conseil : Assurez-vous d'avoir installé 'openpyxl' (`pip install openpyxl`) si c'est un fichier Excel.")
         return
 
-    # --- SUITE DU PROGRAMME (Si tout va bien) ---
+    # --- SUITE DU PROGRAMME ---
     st.subheader("1️⃣ Profil Pharmacie")
     col_a, col_b = st.columns(2)
     
