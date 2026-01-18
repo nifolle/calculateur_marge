@@ -54,13 +54,24 @@ def load_data():
 
     df = None
     try:
-        # TENTATIVE 1 : Lecture standard avec virgule (cas de votre fichier V15)
-        # header=1 signifie que la ligne 2 du fichier contient les titres (Cluster, Appro...)
-        df = pd.read_csv(target, header=1, sep=',', encoding='latin-1')
+        # --- CORRECTIF ROBUSTE ---
+        # 1. On lit la première ligne brute pour voir si c'est une ligne "Source" ou un vrai titre
+        ligne_entete = 0 # Par défaut, on lit la ligne 0
+        try:
+            with open(target, 'r', encoding='latin-1') as f:
+                first_line = f.readline()
+                # Si la ligne contient "[source", on sait qu'il faut décaler d'une ligne
+                if "[source" in first_line or "source:" in first_line:
+                    ligne_entete = 1
+        except:
+            pass # Si erreur de lecture brute, on garde le défaut 0
+
+        # 2. Lecture du CSV avec le bon paramètre header
+        df = pd.read_csv(target, header=ligne_entete, sep=',', encoding='latin-1')
         
-        # Si la lecture échoue (tout dans 1 colonne), on essaie le point-virgule
+        # 3. Fallback : Si le séparateur n'était pas la virgule (tout dans 1 colonne)
         if df.shape[1] < 5:
-            df = pd.read_csv(target, header=1, sep=';', encoding='latin-1')
+            df = pd.read_csv(target, header=ligne_entete, sep=';', encoding='latin-1')
             
     except Exception as e:
         st.error(f"Erreur de lecture du fichier : {e}")
@@ -68,9 +79,6 @@ def load_data():
 
     if df is not None:
         # RENOMMAGE DES COLONNES PAR POSITION (CRUCIAL POUR V15)
-        # La V15 a des colonnes avec le même nom pour 2026 et 2025. 
-        # Pandas les renomme automatiquement (ex: NESTLE, NESTLE.1).
-        # On va forcer nos propres noms pour être sûr.
         if len(df.columns) >= 12:
             new_cols = list(df.columns)
             new_cols[0] = "CLUSTER"
