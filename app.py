@@ -41,44 +41,47 @@ def clean_rate(val):
     except:
         return 0.0
 
-# --- 3. CHARGEMENT ET PRÉPARATION ---
+# --- 3. CHARGEMENT ET PRÉPARATION (VERSION ROBUSTE) ---
 @st.cache_data
 def load_data():
-    # On cherche le fichier data.csv (ou le nom long si oublié)
     target = NOM_FICHIER_DATA
+    # Recherche du fichier si le nom exact n'est pas trouvé
     if not os.path.exists(target):
-        # Petit filet de sécurité : si data.csv n'existe pas, on cherche un autre csv
         files = [f for f in os.listdir() if f.endswith(".csv") and "COMPARATIF" in f]
         if files: target = files[0]
         else: return None
 
     df = None
     try:
-        # --- CORRECTIF ROBUSTE ---
-        # 1. On lit la première ligne brute pour voir si c'est une ligne "Source" ou un vrai titre
-        ligne_entete = 0 # Par défaut, on lit la ligne 0
-        try:
-            with open(target, 'r', encoding='latin-1') as f:
-                first_line = f.readline()
-                # Si la ligne contient "[source", on sait qu'il faut décaler d'une ligne
-                if "[source" in first_line or "source:" in first_line:
-                    ligne_entete = 1
-        except:
-            pass # Si erreur de lecture brute, on garde le défaut 0
-
-        # 2. Lecture du CSV avec le bon paramètre header
-        df = pd.read_csv(target, header=ligne_entete, sep=',', encoding='latin-1')
+        # --- ETAPE 1 : DÉTECTION INTELLIGENTE DU FORMAT ---
+        header_index = 0
+        separator = ',' # Valeur par défaut
         
-        # 3. Fallback : Si le séparateur n'était pas la virgule (tout dans 1 colonne)
-        if df.shape[1] < 5:
-            df = pd.read_csv(target, header=ligne_entete, sep=';', encoding='latin-1')
+        # On lit le fichier ligne par ligne pour trouver où commencent les vraies données
+        with open(target, 'r', encoding='latin-1') as f:
+            lines = f.readlines()
+            for i, line in enumerate(lines):
+                # On cherche la ligne qui contient les titres de colonnes clés
+                if "CLUSTER" in line and "APPROVISIONNEMENT" in line:
+                    header_index = i
+                    # On devine le séparateur (celui qui est le plus présent sur la ligne de titre)
+                    if line.count(';') > line.count(','):
+                        separator = ';'
+                    else:
+                        separator = ','
+                    break
+        
+        # --- ETAPE 2 : CHARGEMENT ---
+        # On charge à partir de la ligne trouvée (header_index)
+        df = pd.read_csv(target, header=header_index, sep=separator, encoding='latin-1')
             
     except Exception as e:
-        st.error(f"Erreur de lecture du fichier : {e}")
+        st.error(f"Erreur technique lors de la lecture : {e}")
         return None
 
     if df is not None:
-        # RENOMMAGE DES COLONNES PAR POSITION (CRUCIAL POUR V15)
+        # --- ETAPE 3 : RENOMMAGE DES COLONNES (Sécurité V15) ---
+        # On force les noms de colonnes pour éviter les doublons (NESTLE, NESTLE.1, etc.)
         if len(df.columns) >= 12:
             new_cols = list(df.columns)
             new_cols[0] = "CLUSTER"
@@ -98,7 +101,7 @@ def load_data():
             
             df.columns = new_cols
 
-        # NETTOYAGE DES TEXTES (Pour que les filtres marchent)
+        # NETTOYAGE DES TEXTES (Pour que les filtres fonctionnent)
         if "CLUSTER" in df.columns:
             df['CLUSTER'] = df['CLUSTER'].astype(str).str.strip()
         if "APPROVISIONNEMENT" in df.columns:
