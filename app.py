@@ -16,7 +16,6 @@ def clean_currency(val):
     if isinstance(val, (int, float)): return float(val)
     
     s = str(val).strip()
-    # On enlève le symbole euro et tous les types d'espaces
     s = s.replace('€', '').replace(' ', '').replace('\xa0', '') 
     s = s.replace(',', '.') # Virgule -> Point
     if s in ['-', '']: return 0.0
@@ -33,7 +32,6 @@ def clean_rate(val):
     s = str(val).strip().upper()
     s = s.replace(',', '.') # Virgule -> Point
     
-    # Règle spécifique demandée : NON ELIGIBLE = 12%
     if "NON ELIGIBLE" in s:
         return 0.12 
     try:
@@ -41,11 +39,10 @@ def clean_rate(val):
     except:
         return 0.0
 
-# --- 3. CHARGEMENT ET PRÉPARATION (VERSION ROBUSTE) ---
+# --- 3. CHARGEMENT ET PRÉPARATION (VERSION BULLDOZER) ---
 @st.cache_data
 def load_data():
     target = NOM_FICHIER_DATA
-    # Recherche du fichier si le nom exact n'est pas trouvé
     if not os.path.exists(target):
         files = [f for f in os.listdir() if f.endswith(".csv") and "COMPARATIF" in f]
         if files: target = files[0]
@@ -53,61 +50,58 @@ def load_data():
 
     df = None
     try:
-        # --- ETAPE 1 : DÉTECTION INTELLIGENTE DU FORMAT ---
-        header_index = 0
-        separator = ',' # Valeur par défaut
-        
-        # On lit le fichier ligne par ligne pour trouver où commencent les vraies données
+        # 1. REPÉRAGE DE LA LIGNE D'EN-TÊTE
+        # On lit le fichier ligne par ligne pour trouver le numéro de la ligne qui contient "CLUSTER"
+        header_row_idx = 0
         with open(target, 'r', encoding='latin-1') as f:
-            lines = f.readlines()
-            for i, line in enumerate(lines):
-                # On cherche la ligne qui contient les titres de colonnes clés
+            for i, line in enumerate(f):
                 if "CLUSTER" in line and "APPROVISIONNEMENT" in line:
-                    header_index = i
-                    # On devine le séparateur (celui qui est le plus présent sur la ligne de titre)
-                    if line.count(';') > line.count(','):
-                        separator = ';'
-                    else:
-                        separator = ','
+                    header_row_idx = i
                     break
         
-        # --- ETAPE 2 : CHARGEMENT ---
-        # On charge à partir de la ligne trouvée (header_index)
-        df = pd.read_csv(target, header=header_index, sep=separator, encoding='latin-1')
-            
+        # 2. LECTURE AVEC LE MOTEUR PYTHON (Plus tolérant aux erreurs)
+        # On essaie d'abord avec la virgule
+        try:
+            df = pd.read_csv(target, header=header_row_idx, sep=',', engine='python', encoding='latin-1')
+        except:
+            # Si ça plante, on ne fait rien, on essaiera le point-virgule juste après
+            pass
+
+        # 3. VÉRIFICATION ET SECONDE CHANCE
+        # Si df est vide ou s'il a tout mis dans une seule colonne (échec de la virgule)
+        if df is None or df.shape[1] < 5:
+            df = pd.read_csv(target, header=header_row_idx, sep=';', engine='python', encoding='latin-1')
+
     except Exception as e:
-        st.error(f"Erreur technique lors de la lecture : {e}")
+        st.error(f"Échec total de la lecture : {e}")
         return None
 
     if df is not None:
-        # --- ETAPE 3 : RENOMMAGE DES COLONNES (Sécurité V15) ---
-        # On force les noms de colonnes pour éviter les doublons (NESTLE, NESTLE.1, etc.)
+        # --- RENOMMAGE ET NETTOYAGE ---
+        # On force les noms de colonnes car Pandas a peut-être ajouté des suffixes .1, .2
         if len(df.columns) >= 12:
             new_cols = list(df.columns)
             new_cols[0] = "CLUSTER"
             new_cols[1] = "APPROVISIONNEMENT"
             new_cols[2] = "CA mini"
             new_cols[3] = "CA maxi"
-            # 2026 (Première série)
             new_cols[4] = "NESTLE_2026"
             new_cols[5] = "LACTALIS_2026"
             new_cols[6] = "NUTRICIA_2026"
             new_cols[7] = "FRESENIUS_2026"
-            # 2025 (Deuxième série)
             new_cols[8] = "NESTLE_2025"
             new_cols[9] = "LACTALIS_2025"
             new_cols[10] = "NUTRICIA_2025"
             new_cols[11] = "FRESENIUS_2025"
-            
             df.columns = new_cols
 
-        # NETTOYAGE DES TEXTES (Pour que les filtres fonctionnent)
+        # Conversion forcée en String pour les filtres
         if "CLUSTER" in df.columns:
             df['CLUSTER'] = df['CLUSTER'].astype(str).str.strip()
         if "APPROVISIONNEMENT" in df.columns:
             df['APPROVISIONNEMENT'] = df['APPROVISIONNEMENT'].astype(str).str.strip()
         
-        # NETTOYAGE DES CHIFFRES
+        # Nettoyage chiffres
         for col in ["CA mini", "CA maxi"]:
             if col in df.columns:
                 df[col] = df[col].apply(clean_currency)
@@ -125,7 +119,6 @@ def load_data():
 
 # --- 4. INTERFACE ---
 def main():
-    # Style (Logo centré)
     st.markdown("""<style>[data-testid="stImage"]{display: block; margin-left: auto; margin-right: auto;}</style>""", unsafe_allow_html=True)
 
     c1, c2, c3 = st.columns([1,2,1])
@@ -137,7 +130,7 @@ def main():
 
     df = load_data()
     if df is None:
-        st.error("❌ Impossible de charger les données. Vérifiez que 'data.csv' est bien présent.")
+        st.error("❌ Impossible de charger les données. Vérifiez le fichier CSV.")
         return
 
     # --- ÉTAPE 1 : CHOIX DU PROFIL ---
@@ -145,10 +138,12 @@ def main():
     col_a, col_b = st.columns(2)
     
     with col_a:
-        # On impose les choix comme demandé
-        choix_cluster = st.selectbox("Cluster", ["Aprium", "UM/Monge"])
+        # On récupère les valeurs uniques dispo dans le fichier pour éviter les menus vides
+        liste_clusters = sorted(df['CLUSTER'].unique()) if 'CLUSTER' in df.columns else ["Aprium", "UM/Monge"]
+        choix_cluster = st.selectbox("Cluster", liste_clusters)
     with col_b:
-        choix_appro = st.selectbox("Mode d'Approvisionnement", ["Direct", "Grossiste"])
+        liste_appros = sorted(df['APPROVISIONNEMENT'].unique()) if 'APPROVISIONNEMENT' in df.columns else ["Direct", "Grossiste"]
+        choix_appro = st.selectbox("Mode d'Approvisionnement", liste_appros)
 
     st.markdown("---")
 
